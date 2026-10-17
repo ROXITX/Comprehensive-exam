@@ -49,6 +49,7 @@ for (const file of readdirSync(contentDir).filter((f) => f.endsWith('.md')).sort
     if (correct !== 1) fail(file, q.ln, `question needs exactly one correct option (has ${correct}): ${q.q.slice(0, 60)}`);
     if (q.o.length < 2) fail(file, q.ln, `too few options: ${q.q.slice(0, 60)}`);
     if (q.o.some((o) => !o.w)) fail(file, q.ln, `option missing "~~ why": ${q.q.slice(0, 60)}`);
+    if (new Set(q.o.map((o) => norm(o.t))).size !== q.o.length) fail(file, q.ln, `duplicate option text: ${q.q.slice(0, 60)}`);
     const key = norm(q.q) + '|' + q.o.map((o) => norm(o.t)).sort().join('|');
     q.id = subject.id + '-' + hash(key);
     if (seenGlobal.has(q.id)) fail(file, q.ln, `duplicate question (also at ${seenGlobal.get(q.id)}): ${q.q.slice(0, 60)}`);
