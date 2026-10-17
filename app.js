@@ -859,7 +859,7 @@ function mePage() {
     i.click();
   };
   $('#reset').onclick = () => { if (confirm('Erase ALL progress on this device (and cloud, if signed in)?')) { P = { ...blank(), owner: sync.user?.uid || '' }; persist(); route(); refreshChrome(); } };
-  $('#signin')?.addEventListener('click', () => sync.signIn().catch((e) => toast('Sign-in failed: ' + e.message)));
+  $('#signin')?.addEventListener('click', () => sync.signIn().catch((e) => toast(authError(e), 5000)));
   $('#signout')?.addEventListener('click', () => sync.signOut());
 }
 function syncBlock() {
@@ -876,7 +876,7 @@ async function ranksPage() {
   if (!sync.enabled) { box.outerHTML = '<div class="card muted">The leaderboard needs cloud sync, which isn\'t set up yet.</div>'; return; }
   if (!sync.user) {
     box.outerHTML = '<div class="card stack"><p class="muted">Sign in to join the leaderboard and see your friends.</p><button class="btn" id="signin">Sign in with Google</button></div>';
-    $('#signin').onclick = () => sync.signIn().catch((e) => toast('Sign-in failed: ' + e.message));
+    $('#signin').onclick = () => sync.signIn().catch((e) => toast(authError(e), 5000));
     return;
   }
   try {
@@ -892,6 +892,15 @@ async function ranksPage() {
   } catch (e) {
     box.outerHTML = `<div class="card muted">Couldn't load the leaderboard (${esc(e.code || e.message)}).</div>`;
   }
+}
+
+function authError(e) {
+  const c = e.code || '';
+  if (/configuration-not-found|operation-not-allowed/.test(c)) return 'Google sign-in isn\'t enabled in Firebase yet (Authentication → Sign-in method → Google).';
+  if (/unauthorized-domain/.test(c)) return 'This website isn\'t authorised in Firebase yet (Authentication → Settings → Authorized domains → add roxitx.github.io).';
+  if (/popup-closed|cancelled-popup/.test(c)) return 'Sign-in was cancelled.';
+  if (/network/.test(c)) return 'No internet connection — try again when online.';
+  return 'Sign-in failed: ' + (e.message || c);
 }
 
 function notFound() { app.innerHTML = '<div class="card center"><h2>Page not found</h2><a class="btn" href="#/">Home</a></div>'; }
