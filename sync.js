@@ -1,10 +1,12 @@
-// Optional cloud sync: Google sign-in + one Firestore document per user (users/{uid}).
+// Optional cloud sync: Google sign-in, one private Firestore document per user (users/{uid})
+// plus a public leaderboard entry (leaderboard/{uid}).
 // Progress always lives in localStorage first; Firestore is a backup that merges across devices.
+// Local progress is tagged with its owner's uid so different people can share one device safely.
 import { firebaseConfig } from './firebase-config.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 
-export function createSync({ get, set, merge, onStatus }) {
+export function createSync({ get, set, merge, summary, onStatus }) {
   let fb = null, timer = null, pulling = false;
   const api = {
     enabled: !!(firebaseConfig && firebaseConfig.apiKey),
@@ -34,29 +36,43 @@ export function createSync({ get, set, merge, onStatus }) {
     async signIn() {
       if (!fb) throw new Error('Cloud sync is still loading — try again in a moment');
       const provider = new fb.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       try { await fb.auth.signInWithPopup(fb.a, provider); }
       catch (e) {
         if (/popup|cancelled|operation-not-supported/i.test(e.code || '')) await fb.auth.signInWithRedirect(fb.a, provider);
         else throw e;
       }
     },
-    async signOut() { await flush(); await fb?.auth.signOut(fb.a); },
+    async signOut() {
+      await flush();
+      await fb?.auth.signOut(fb.a);
+      set(null); // start the next person on this device from a clean slate
+    },
     push() {
       if (!api.user || pulling) return;
       clearTimeout(timer);
       timer = setTimeout(flush, 3000);
     },
+    async leaderboard(n = 50) {
+      if (!fb || !api.user) return [];
+      const { collection, query, orderBy, limit, getDocs } = fb.fs;
+      const snap = await getDocs(query(collection(fb.db, 'leaderboard'), orderBy('xp', 'desc'), limit(n)));
+      return snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+    },
   };
   function setStatus(s) { api.status = s; onStatus?.(); }
-  const ref = () => fb.fs.doc(fb.db, 'users', api.user.uid);
   async function pull() {
     pulling = true;
     try {
-      const snap = await fb.fs.getDoc(ref());
-      if (snap.exists()) {
-        const remote = JSON.parse(snap.data().p || '{}');
-        set(merge(get(), remote));
-      }
+      const uid = api.user.uid;
+      const snap = await fb.fs.getDoc(fb.fs.doc(fb.db, 'users', uid));
+      const remote = snap.exists() ? JSON.parse(snap.data().p || '{}') : null;
+      const local = get();
+      // Guest progress (no owner yet) is claimed by the first account that signs in.
+      // Progress owned by someone else is never mixed into this account.
+      const base = !local.owner || local.owner === uid ? local : null;
+      const next = remote ? (base ? merge(base, remote) : remote) : base || {};
+      set({ ...next, owner: uid });
       pulling = false;
       await flush();
     } catch (e) {
@@ -69,7 +85,12 @@ export function createSync({ get, set, merge, onStatus }) {
     if (!api.user || !fb) return;
     try {
       const p = get();
-      await fb.fs.setDoc(ref(), { p: JSON.stringify(p), xp: p.xp, updated: p.updated, name: api.user.displayName || '' });
+      if (p.owner !== api.user.uid) return;
+      const name = api.user.displayName || (api.user.email || 'Player').split('@')[0];
+      await Promise.all([
+        fb.fs.setDoc(fb.fs.doc(fb.db, 'users', api.user.uid), { p: JSON.stringify(p), xp: p.xp, updated: p.updated, name }),
+        fb.fs.setDoc(fb.fs.doc(fb.db, 'leaderboard', api.user.uid), { name, photo: api.user.photoURL || '', ...summary(), updated: Date.now() }),
+      ]);
       setStatus('Synced ' + new Date().toLocaleTimeString());
     } catch (e) {
       setStatus('Saved on device · cloud sync will retry (' + (e.code || e.message) + ')');

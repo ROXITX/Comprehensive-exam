@@ -9,7 +9,7 @@ const app = $('#app');
 const KEY = 'cq-progress-v1';
 const MOCK_KEY = 'cq-mock-v1';
 const blank = () => ({
-  v: 1, xp: 0, streak: { n: 0, last: '' }, day: { d: '', xp: 0, ans: 0 },
+  v: 1, owner: '', xp: 0, streak: { n: 0, last: '' }, day: { d: '', xp: 0, ans: 0 },
   q: {}, stars: {}, badges: {}, mocks: [],
   stats: { ans: 0, ok: 0, bestCombo: 0, sessions: 0, fixed: 0, blitzBest: 0 },
   settings: { sound: true, vib: true, shuffle: true, goal: 300, mockMin: 100 },
@@ -26,6 +26,11 @@ const sync = createSync({
   get: () => P,
   set: (next) => { P = hydrate(next); persist(false); refreshChrome(); route(); },
   merge: mergeProgress,
+  summary: () => ({
+    xp: P.xp, level: level(P.xp), streak: streakNow(), correct: P.stats.ok, answered: P.stats.ans,
+    mastery: INDEX ? pct(mastery(INDEX.subjects.flatMap(allIds))) : 0,
+    bestMock: P.mocks.reduce((b, m) => Math.max(b, Math.round((m.ok / m.n) * 100)), 0),
+  }),
   onStatus: () => { refreshChrome(); if (location.hash === '#/me') route(); },
 });
 function persist(push = true) {
@@ -592,6 +597,7 @@ function playPage() {
     <a class="card tap row" href="#/quiz/allpyq"><div class="sub-icon">📜</div><div class="grow"><b>Question-bank mix</b><div class="small muted">20 past-paper Qs from all subjects</div></div></a>
     <a class="card tap row" href="#/quiz/weak"><div class="sub-icon">🎯</div><div class="grow"><b>Weak spots</b><div class="small muted">20 Qs from your weakest topics</div></div></a>
     <a class="card tap row" href="#/quiz/mixed"><div class="sub-icon">🎲</div><div class="grow"><b>Random 20</b><div class="small muted">Everything, smart-picked</div></div></a>
+    <a class="card tap row" href="#/ranks"><div class="sub-icon">🏆</div><div class="grow"><b>Leaderboard</b><div class="small muted">Compete with your friends on XP and streaks</div></div></a>
   </div>`;
 }
 
@@ -715,6 +721,7 @@ function mePage() {
   </div>
   <div class="section-title">Badges · ${Object.keys(P.badges).length}/${BADGES.length}</div>
   <div class="badges">${BADGES.map(([id, icon, name, desc]) => `<div class="badge ${P.badges[id] ? '' : 'locked'}" title="${esc(desc)}"><span class="i">${icon}</span><b>${name}</b><div class="muted">${desc}</div></div>`).join('')}</div>
+  <a class="btn gold" style="margin-top:12px" href="#/ranks">🏆 Leaderboard</a>
   <div class="section-title">Cloud sync</div>
   <div class="card stack">${syncBlock()}</div>
   <div class="section-title">Settings</div>
@@ -747,7 +754,7 @@ function mePage() {
     };
     i.click();
   };
-  $('#reset').onclick = () => { if (confirm('Erase ALL progress on this device (and cloud, if signed in)?')) { P = blank(); persist(); route(); refreshChrome(); } };
+  $('#reset').onclick = () => { if (confirm('Erase ALL progress on this device (and cloud, if signed in)?')) { P = { ...blank(), owner: sync.user?.uid || '' }; persist(); route(); refreshChrome(); } };
   $('#signin')?.addEventListener('click', () => sync.signIn().catch((e) => toast('Sign-in failed: ' + e.message)));
   $('#signout')?.addEventListener('click', () => sync.signOut());
 }
@@ -757,6 +764,30 @@ function syncBlock() {
     <div class="small muted">${esc(sync.status)}</div><button class="btn alt sm" id="signout">Sign out</button>`;
   return `<p class="small muted">Sign in to back up progress and continue on any device.</p>
     <div class="small muted">${esc(sync.status)}</div><button class="btn" id="signin">Sign in with Google</button>`;
+}
+
+async function ranksPage() {
+  app.innerHTML = '<h1>🏆 Leaderboard</h1><div id="lb" class="loading">Loading…</div>';
+  const box = $('#lb');
+  if (!sync.enabled) { box.outerHTML = '<div class="card muted">The leaderboard needs cloud sync, which isn\'t set up yet.</div>'; return; }
+  if (!sync.user) {
+    box.outerHTML = '<div class="card stack"><p class="muted">Sign in to join the leaderboard and see your friends.</p><button class="btn" id="signin">Sign in with Google</button></div>';
+    $('#signin').onclick = () => sync.signIn().catch((e) => toast('Sign-in failed: ' + e.message));
+    return;
+  }
+  try {
+    const rows = await sync.leaderboard();
+    const medal = ['🥇', '🥈', '🥉'];
+    box.outerHTML = `<p class="muted small">Ranked by total XP · updates as people study</p><div class="card">${rows.map((r, i) => `
+      <div class="list-item" style="${r.uid === sync.user.uid ? 'background:rgba(124,92,255,.12);margin:0 -14px;padding:12px 14px;border-radius:12px' : ''}">
+        <b style="width:30px;text-align:center">${medal[i] || i + 1}</b>
+        <div class="grow"><b>${esc(r.name || 'Player')}${r.uid === sync.user.uid ? ' (you)' : ''}</b>
+          <div class="small muted">Lv ${r.level || 1} · 🔥 ${r.streak || 0} · ${r.mastery || 0}% mastery${r.bestMock ? ` · best mock ${r.bestMock}%` : ''}</div></div>
+        <b>⭐ ${r.xp || 0}</b>
+      </div>`).join('') || '<div class="muted">No players yet — be the first!</div>'}</div>`;
+  } catch (e) {
+    box.outerHTML = `<div class="card muted">Couldn't load the leaderboard (${esc(e.code || e.message)}).</div>`;
+  }
 }
 
 function notFound() { app.innerHTML = '<div class="card center"><h2>Page not found</h2><a class="btn" href="#/">Home</a></div>'; }
@@ -774,6 +805,7 @@ const routes = [
   [/^#\/mock$/, mockHome],
   [/^#\/mock\/run$/, mockRun],
   [/^#\/me$/, mePage],
+  [/^#\/ranks$/, ranksPage],
 ];
 async function route() {
   if (S) { stopTimer(); S = null; }
