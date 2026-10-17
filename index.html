@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1222">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Gamified MCQ prep for the CSE1907 Comprehensive Examination">
+  <title>CompreQuest</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar" id="topbar"></header>
+  <main id="app" class="app"><div class="loading">Loading…</div></main>
+  <nav class="tabbar" id="tabbar">
+    <a href="#/" data-tab="home"><span>🏠</span>Home</a>
+    <a href="#/review" data-tab="review"><span>🔁</span>Review</a>
+    <a href="#/play" data-tab="play"><span>⚡</span>Play</a>
+    <a href="#/mock" data-tab="mock"><span>📝</span>Mock</a>
+    <a href="#/me" data-tab="me"><span>👤</span>Me</a>
+  </nav>
+  <div id="toast" class="toast" hidden></div>
+  <canvas id="confetti" class="confetti"></canvas>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
