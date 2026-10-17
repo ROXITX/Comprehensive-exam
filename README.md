@@ -4,7 +4,7 @@ Gamified, mobile-first MCQ prep for the **CSE1907 Comprehensive Examination** (M
 
 - Every syllabus subject, organised topic by topic
 - All question-bank (2022 & 2023 batch) questions, with answers re-checked, plus 4–5 similar questions for each
-- An explanation for every option, a one-line memory hook, and quick-revision cards for each topic
+- **Revision slides** for every topic (307 slides) that teach the basics simply, plus an explanation for every option, a memory hook, and exam-fact cards
 - XP, levels, streaks, combos, boss rounds with stars, badges, a 60-second Blitz mode and a 100-question timed mock exam
 - Spaced-repetition review queue and a mistake book
 - Works offline (PWA, installable). Optional Firebase Google sign-in syncs progress across devices.
@@ -17,7 +17,10 @@ Settings → Pages → Build and deployment → Source: **Deploy from a branch**
 2. Authentication → Sign-in method → enable **Google**. Under Authentication → Settings → Authorized domains, add `<your-user>.github.io`.
 3. Firestore Database → create database, then paste `firestore.rules` into the Rules tab.
 
-## Multiple users
+## Multiple users & devices
+Everything (answers, XP, slides seen, an unfinished quiz, an unfinished mock exam) is saved to the signed-in user's Firestore record,
+so logging in on any device continues exactly where you left off. The app re-syncs whenever it is reopened.
+
 Anyone can use the same site: each person signs in with their own Google account and gets a private progress record (`users/{uid}`).
 Progress made before signing in is claimed by the first account that signs in on that device. Signing out clears the device, so
 friends can share a phone without their progress mixing. Signed-in users appear on the **🏆 Leaderboard** (`leaderboard/{uid}`:

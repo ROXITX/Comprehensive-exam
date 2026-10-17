@@ -10,7 +10,7 @@ const KEY = 'cq-progress-v1';
 const MOCK_KEY = 'cq-mock-v1';
 const blank = () => ({
   v: 1, owner: '', xp: 0, streak: { n: 0, last: '' }, day: { d: '', xp: 0, ans: 0 },
-  q: {}, stars: {}, badges: {}, mocks: [],
+  q: {}, stars: {}, badges: {}, mocks: [], slides: {}, session: null, mock: null, last: null,
   stats: { ans: 0, ok: 0, bestCombo: 0, sessions: 0, fixed: 0, blitzBest: 0 },
   settings: { sound: true, vib: true, shuffle: true, goal: 300, mockMin: 100 },
   updated: 0,
@@ -22,9 +22,10 @@ function hydrate(raw) {
     stats: { ...b.stats, ...raw.stats }, settings: { ...b.settings, ...raw.settings } };
 }
 let P = (() => { try { return hydrate(JSON.parse(localStorage.getItem(KEY))); } catch { return blank(); } })();
+try { const old = JSON.parse(localStorage.getItem(MOCK_KEY)); if (old && !P.mock) P.mock = old; localStorage.removeItem(MOCK_KEY); } catch { /* ignore */ }
 const sync = createSync({
   get: () => P,
-  set: (next) => { P = hydrate(next); persist(false); refreshChrome(); route(); },
+  set: (next) => { P = hydrate(next); persist(false); refreshChrome(); if (!S && !/^#\/(mock\/run|slides)/.test(location.hash)) route(); },
   merge: mergeProgress,
   summary: () => ({
     xp: P.xp, level: level(P.xp), streak: streakNow(), correct: P.stats.ok, answered: P.stats.ans,
@@ -49,6 +50,8 @@ function mergeProgress(a, b) {
   m.stars = { ...a.stars };
   for (const [k, s] of Object.entries(b.stars)) m.stars[k] = Math.max(s, m.stars[k] || 0);
   m.badges = { ...b.badges, ...a.badges };
+  m.slides = { ...a.slides };
+  for (const [k, n] of Object.entries(b.slides)) m.slides[k] = Math.max(n, m.slides[k] || 0);
   const mocks = new Map([...a.mocks, ...b.mocks].map((x) => [x.ts, x]));
   m.mocks = [...mocks.values()].sort((x, y) => x.ts - y.ts);
   for (const k of Object.keys(m.stats)) m.stats[k] = Math.max(a.stats[k] || 0, b.stats[k] || 0);
@@ -266,8 +269,10 @@ function home() {
     ${bar((P.xp - lo) / (hi - lo))}
     <div class="small">Daily goal: ${dayXP}/${P.settings.goal} XP ${dayXP >= P.settings.goal ? '✅' : ''} · Overall mastery ${pct(mastery(totalIds))}% · Seen ${seen(totalIds)}/${totalIds.length}</div>
   </div>
+  ${P.session ? `<a class="card tap row" style="margin-top:12px;border-color:var(--accent)" href="#/resume"><div class="sub-icon">▶️</div><div class="grow"><div class="small muted">Continue where you left off</div><b>${esc(P.session.title)}</b><div class="small muted">Question ${Math.min(P.session.i + 1, P.session.ids.length)} of ${P.session.ids.length} · ${P.session.ok} correct so far</div></div></a>` : ''}
+  ${P.mock ? `<a class="card tap row" style="margin-top:12px;border-color:var(--gold)" href="#/mock/run"><div class="sub-icon">📝</div><div class="grow"><div class="small muted">Unfinished mock exam</div><b>${Object.keys(P.mock.ans).length}/${P.mock.ids.length} answered</b><div class="small muted">Timer keeps running — finish it!</div></div></a>` : ''}
   <div class="grid2" style="margin-top:12px">
-    ${weakest ? `<a class="card tap" href="#/quiz/topic/${weakest.s.id}/${weakest.t.id}"><div class="small muted">Next up</div><b>▶ ${esc(weakest.t.name)}</b><div class="small muted">${esc(weakest.s.name)}</div></a>` : ''}
+    ${weakest ? `<a class="card tap" href="${(P.slides[weakest.s.id + '/' + weakest.t.id] || 0) < weakest.t.slides ? `#/slides/${weakest.s.id}/${weakest.t.id}` : `#/quiz/topic/${weakest.s.id}/${weakest.t.id}`}"><div class="small muted">Next up</div><b>${(P.slides[weakest.s.id + '/' + weakest.t.id] || 0) < weakest.t.slides ? '📽' : '▶'} ${esc(weakest.t.name)}</b><div class="small muted">${esc(weakest.s.name)}</div></a>` : ''}
     <a class="card tap" href="#/review"><div class="small muted">Review queue</div><b>🔁 ${due} due</b><div class="small muted">Fix mistakes for XP</div></a>
   </div>
   <div class="section-title">Subjects · ${INDEX.total} questions</div>
@@ -298,12 +303,13 @@ function subjectPage(sid) {
       <a class="btn" href="#/quiz/subject/${sid}">🎲 Mixed 15</a>
       <a class="btn gold" href="#/quiz/pyq/${sid}">📜 Bank Qs</a>
     </div>
+    <a class="btn alt" href="#/slides/${sid}/*">📽 All revision slides for this subject</a>
   </div>
   <div class="section-title">Topics</div>
   <div class="stack">
     ${s.topics.map((t) => `
       <a class="card tap" href="#/t/${sid}/${t.id}">
-        <div class="row between"><b class="grow">${esc(t.name)}</b><span class="stars">${starStr(P.stars[sid + '/' + t.id] || 0)}</span></div>
+        <div class="row between"><b class="grow">${(P.slides[sid + '/' + t.id] || 0) >= t.slides && t.slides ? '✅ ' : ''}${esc(t.name)}</b><span class="stars">${starStr(P.stars[sid + '/' + t.id] || 0)}</span></div>
         <div class="small muted" style="margin:3px 0 6px">${t.ids.length} questions · ${seen(t.ids)} seen · ${pct(mastery(t.ids))}% mastery</div>
         ${bar(mastery(t.ids))}
       </a>`).join('')}
@@ -320,7 +326,8 @@ function topicPage(sid, tid) {
   <div class="row small muted"><span class="stars">${starStr(P.stars[sid + '/' + tid] || 0)}</span><span>${t.ids.length} questions · ${t.pyq.length} from bank · ${pct(mastery(t.ids))}% mastery</span></div>
   <div style="margin:10px 0 16px">${bar(mastery(t.ids))}</div>
   <div class="stack">
-    ${t.notes ? `<a class="btn alt" href="#/learn/${sid}/${tid}">📖 Quick revision · ${t.notes} cards</a>` : ''}
+    ${t.slides ? `<a class="btn good" href="#/slides/${sid}/${tid}">📽 Learn the basics · ${t.slides} slides ${(P.slides[sid + '/' + tid] || 0) >= t.slides ? '✓' : ''}</a>` : ''}
+    ${t.notes ? `<a class="btn alt" href="#/learn/${sid}/${tid}">📖 Exam facts · ${t.notes} cards</a>` : ''}
     <a class="btn" href="#/quiz/topic/${sid}/${tid}">▶ Practice 10</a>
     <a class="btn alt" href="#/quiz/drill/${sid}/${tid}">🧱 Drill all ${t.ids.length} in order</a>
     ${t.pyq.length ? `<a class="btn alt" href="#/quiz/tpyq/${sid}/${tid}">📜 Question-bank only · ${t.pyq.length}</a>` : ''}
@@ -354,6 +361,79 @@ async function learn(sid, tid) {
       toast('📖 Revision done! Now practise it.');
       location.hash = `#/quiz/topic/${sid}/${tid}`;
     };
+  };
+  draw();
+}
+
+/* ---------------- revision slides ---------------- */
+function slideBody(lines) {
+  let html = '', list = [];
+  const flush = () => { if (list.length) { html += `<ul>${list.map((x) => `<li>${inline(x)}</li>`).join('')}</ul>`; list = []; } };
+  for (const l of lines) {
+    if (/^- /.test(l)) { list.push(l.slice(2)); continue; }
+    flush();
+    if (/^💡/.test(l)) html += `<div class="hook">${inline(l)}</div>`;
+    else if (/^`.*`$/.test(l) && l.length > 2) html += `<pre>${esc(l.slice(1, -1))}</pre>`;
+    else html += `<p>${inline(l)}</p>`;
+  }
+  flush();
+  return html;
+}
+async function slidesPage(sid, tid) {
+  const subj = await loadSubject(sid);
+  const all = tid === '*';
+  const topics = all ? subj.topics.filter((t) => t.slides?.length) : subj.topics.filter((t) => t.id === tid && t.slides?.length);
+  if (!topics.length) return notFound();
+  const deck = topics.flatMap((t) => t.slides.map((sl, k) => ({ ...sl, t: sl.t, topic: t, k })));
+  const back = all ? `#/s/${sid}` : `#/t/${sid}/${tid}`;
+  let i = 0;
+  if (!all) i = Math.min(P.slides[sid + '/' + tid] || 0, deck.length - 1);
+  if (i === deck.length - 1) i = 0;
+  P.last = { hash: location.hash, title: '📽 ' + (all ? subj.name : topics[0].name), ts: Date.now() };
+  setFocus(true);
+  const mark = () => {
+    const d = deck[i], key = sid + '/' + d.topic.id;
+    if ((P.slides[key] || 0) < d.k + 1) { P.slides[key] = d.k + 1; addXP(3); persist(); refreshChrome(); }
+  };
+  const draw = () => {
+    const d = deck[i];
+    mark();
+    const last = i === deck.length - 1;
+    app.innerHTML = `
+    <div class="qhead"><button class="x" id="quit" aria-label="Close">✕</button>${bar((i + 1) / deck.length)}<span class="small muted">${i + 1}/${deck.length}</span></div>
+    <div class="card slide" id="slide">
+      <div class="small muted">${subj.icon} ${esc(d.topic.name)}${all ? '' : ` · slide ${d.k + 1} of ${d.topic.slides.length}`}</div>
+      <h2>${inline(d.t)}</h2>
+      <div class="slide-body">${slideBody(d.b)}</div>
+    </div>
+    <div class="grid2" style="margin-top:14px">
+      <button class="btn alt" id="prev" ${i ? '' : 'disabled'}>‹ Back</button>
+      <button class="btn ${last ? 'good' : ''}" id="next">${last ? 'Done ✓' : 'Next ›'}</button>
+    </div>
+    <p class="small muted center" style="margin-top:10px">Swipe or use ← → keys</p>`;
+    $('#quit').onclick = () => { setFocus(false); go(back); };
+    $('#prev').onclick = () => { if (i) { i--; draw(); } };
+    $('#next').onclick = () => {
+      if (!last) { i++; draw(); return; }
+      setFocus(false);
+      checkBadges(); persist();
+      confetti(); toast('📽 Basics done! Now test yourself.');
+      location.hash = all ? `#/quiz/subject/${sid}` : `#/quiz/topic/${sid}/${tid}`;
+    };
+    let x0 = null;
+    const el = $('#slide');
+    el.ontouchstart = (e) => { x0 = e.touches[0].clientX; };
+    el.ontouchend = (e) => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (dx < -50 && !last) { i++; draw(); } else if (dx > 50 && i) { i--; draw(); }
+    };
+    window.scrollTo(0, 0);
+  };
+  onkeydown = (e) => {
+    if (!/^#\/slides/.test(location.hash)) return;
+    if (e.key === 'ArrowRight') $('#next')?.click();
+    if (e.key === 'ArrowLeft') $('#prev')?.click();
   };
   draw();
 }
@@ -398,6 +478,27 @@ async function startQuiz(mode, sid, tid) {
   S = { mode, title: titleText, back, qs, i: 0, ok: 0, combo: 0, best: 0, xp: 0, log: [], orders: [], timer: null, sid, tid,
     left: 0, deadline: 0, blitz: mode === 'blitz', boss: mode === 'boss' };
   if (S.blitz) S.deadline = Date.now() + 60e3;
+  S.resumable = !S.blitz && !S.boss;
+  if (S.resumable) saveSession();
+  setFocus(true);
+  renderQ();
+}
+function saveSession() {
+  P.session = { mode: S.mode, sid: S.sid || null, tid: S.tid || null, title: S.title, back: S.back, ids: S.qs.map((q) => q.id),
+    i: S.log.length, ok: S.ok, combo: S.combo, best: S.best, xp: S.xp, log: S.log.map((x) => [x.q.id, x.picked]), ts: Date.now() };
+}
+async function resumeQuiz() {
+  const r = P.session;
+  if (!r) { go('#/'); return; }
+  app.innerHTML = '<div class="loading">Loading…</div>';
+  await loadAll();
+  const byId = new Map(Object.values(SUBJ).flatMap((x) => x.questions).map((q) => [q.id, q]));
+  const qs = r.ids.map((id) => byId.get(id)).filter(Boolean);
+  if (!qs.length) { P.session = null; persist(); go('#/'); return; }
+  const log = r.log.map(([id, picked]) => { const q = byId.get(id); return q && { q, picked, ok: picked === q.a }; }).filter(Boolean);
+  S = { mode: r.mode, title: r.title, back: r.back, qs, i: Math.min(r.i, qs.length - 1), ok: r.ok, combo: r.combo, best: r.best, xp: r.xp,
+    log, orders: [], timer: null, sid: r.sid, tid: r.tid, left: 0, deadline: 0, blitz: false, boss: false, resumable: true };
+  if (r.i >= qs.length) { endSession(); return; }
   setFocus(true);
   renderQ();
 }
@@ -476,6 +577,7 @@ function answer(n) {
     const c = $('#combo'); c.textContent = S.combo >= 2 ? '🔥' + S.combo : ''; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
     if ([5, 10, 15, 20, 25, 30, 40, 50].includes(S.combo)) toast(`🔥 ${S.combo} in a row!`);
   } else { S.combo = 0; sfx.bad(); $('#combo').textContent = ''; }
+  if (S.resumable) saveSession();
   checkBadges(); persist(); refreshChrome();
 
   if (S.blitz) {
@@ -509,7 +611,9 @@ function endSession(quit = false) {
   setFocus(false);
   if (!s) return;
   S = null;
-  if (quit && !s.log.length) { go(s.back); return; }
+  if (s.resumable && !quit) P.session = null;
+  if (quit && !s.log.length) { if (s.resumable) { P.session = null; persist(); } go(s.back); return; }
+  if (quit && s.resumable) { persist(); toast('⏸ Saved — continue any time from Home'); go(s.back); return; }
   const n = s.log.length, acc = n ? s.ok / n : 0;
   P.stats.sessions++;
   let stars = 0;
@@ -604,7 +708,7 @@ function playPage() {
 /* ---------------- mock exam ---------------- */
 let M = null;
 function mockHome() {
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(MOCK_KEY)); } catch { return null; } })();
+  const saved = P.mock;
   const hist = [...P.mocks].reverse();
   app.innerHTML = `
   <h1>📝 Mock exam</h1>
@@ -628,10 +732,10 @@ function mockHome() {
   };
   if (saved) $('#resume').onclick = () => { M = saved; location.hash = '#/mock/run'; };
 }
-const saveMock = () => { try { localStorage.setItem(MOCK_KEY, JSON.stringify(M)); } catch { /* ignore */ } };
+const saveMock = () => { P.mock = M; persist(); };
 let qById = null;
 async function mockRun() {
-  if (!M) { try { M = JSON.parse(localStorage.getItem(MOCK_KEY)); } catch { M = null; } }
+  M = P.mock;
   if (!M) { location.hash = '#/mock'; return; }
   await loadAll();
   qById = new Map(Object.values(SUBJ).flatMap((s) => s.questions).map((q) => [q.id, q]));
@@ -690,7 +794,7 @@ function submitMock() {
   const rec = { ts: Date.now(), n: log.length, ok, dur: Math.round((Date.now() - M.start) / 1000), by };
   P.mocks.push(rec);
   addXP(ok * 5);
-  localStorage.removeItem(MOCK_KEY); M = null;
+  P.mock = null; M = null;
   checkBadges(); persist(); refreshChrome();
   if (ok / log.length >= 0.7) confetti();
   const wrong = log.filter((x) => !x.ok);
@@ -806,6 +910,8 @@ const routes = [
   [/^#\/mock\/run$/, mockRun],
   [/^#\/me$/, mePage],
   [/^#\/ranks$/, ranksPage],
+  [/^#\/resume$/, resumeQuiz],
+  [/^#\/slides\/(\w+)\/([\w*-]+)$/, slidesPage],
 ];
 async function route() {
   if (S) { stopTimer(); S = null; }

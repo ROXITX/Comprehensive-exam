@@ -13,7 +13,13 @@
 //   P: label                          source tag, e.g. "PYQ" for question-bank questions
 //   F: note                           answer-key note (e.g. bank key disagreement)
 //   K: fixed                          keep option order (no shuffling)
-import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
+//
+// Slides DSL (content/slides/*.md) — basic teaching decks per topic
+//   @subject id                       subject the decks belong to
+//   # topicId                         starts that topic's deck
+//   S: Slide title                    starts a slide
+//   > text                            a paragraph; "> - text" is a bullet; "> 💡 text" is a tip box
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,6 +38,23 @@ const NO_SHUFFLE = /\b(all|none|both|neither)\b.*\b(above|these|of|options|a|b|c
 
 let errors = 0;
 const fail = (file, line, msg) => { errors++; console.error(`✗ ${file}:${line} ${msg}`); };
+
+// Slides: subject id → topic id → [{ t, b: [lines] }]
+const slides = {};
+const slidesDir = join(contentDir, 'slides');
+for (const file of existsSync(slidesDir) ? readdirSync(slidesDir).filter((f) => f.endsWith('.md')).sort() : []) {
+  let sid = '', deck = null, slide = null;
+  readFileSync(join(slidesDir, file), 'utf8').split('\n').forEach((raw, i) => {
+    const line = raw.trimEnd();
+    let m;
+    if (!line.trim() || line.startsWith('//')) return;
+    if ((m = line.match(/^@subject\s+(\S+)/))) { sid = m[1]; slides[sid] ||= {}; return; }
+    if ((m = line.match(/^#\s+([\w-]+)/))) { deck = slides[sid][m[1]] = []; slide = null; return; }
+    if ((m = line.match(/^S:\s*(.+)/)) && deck) { slide = { t: m[1], b: [] }; deck.push(slide); return; }
+    if ((m = line.match(/^>\s?(.*)/)) && slide) { slide.b.push(m[1]); return; }
+    fail(`slides/${file}`, i + 1, `unrecognised line: ${line.slice(0, 60)}`);
+  });
+}
 
 const index = [];
 const seenGlobal = new Map();
@@ -99,6 +122,12 @@ for (const file of readdirSync(contentDir).filter((f) => f.endsWith('.md')).sort
   finishQ(lines.length);
 
   if (!subject.id) { fail(file, 1, 'missing @subject'); continue; }
+  for (const [tid, deck] of Object.entries(slides[subject.id] || {})) {
+    const t = subject.topics.find((x) => x.id === tid);
+    if (!t) fail(`slides`, 0, `${subject.id}: unknown topic "${tid}"`);
+    else t.slides = deck;
+  }
+  for (const t of subject.topics) if (!t.slides) console.warn(`! ${file}: topic "${t.id}" has no slides`);
   const counts = {};
   for (const x of subject.questions) counts[x.t] = (counts[x.t] || 0) + 1;
   for (const t of subject.topics) if (!counts[t.id]) console.warn(`! ${file}: topic "${t.id}" has no questions`);
@@ -109,7 +138,7 @@ for (const file of readdirSync(contentDir).filter((f) => f.endsWith('.md')).sort
     id: subject.id, name: subject.name, icon: subject.icon, desc: subject.desc, order: subject.order,
     count: subject.questions.length, pyq,
     topics: subject.topics.map((t) => ({
-      id: t.id, name: t.name, notes: t.notes.length,
+      id: t.id, name: t.name, notes: t.notes.length, slides: (t.slides || []).length,
       ids: subject.questions.filter((x) => x.t === t.id).map((x) => x.id),
       pyq: subject.questions.filter((x) => x.t === t.id && x.p).map((x) => x.id),
     })),

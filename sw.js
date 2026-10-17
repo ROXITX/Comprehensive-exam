@@ -1,5 +1,5 @@
 // App shell: stale-while-revalidate. Question data: network-first so new questions arrive, cache for offline.
-const CACHE = 'cq-v1';
+const CACHE = 'cq-v2';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'sync.js', 'firebase-config.js', 'manifest.webmanifest', 'assets/icon.svg', 'assets/icon-192.png', 'assets/icon-512.png'];
 
 self.addEventListener('install', (e) => {

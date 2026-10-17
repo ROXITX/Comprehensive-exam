@@ -26,7 +26,11 @@ export function createSync({ get, set, merge, summary, onStatus }) {
           setStatus(u ? 'Syncing…' : 'Not signed in');
           if (u) await pull();
         });
-        addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+        let lastPull = Date.now();
+        addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') flush();
+          else if (api.user && Date.now() - lastPull > 15000) { lastPull = Date.now(); pull(); }
+        });
         addEventListener('online', () => api.user && flush());
       } catch (e) {
         setStatus('Cloud sync unavailable offline');

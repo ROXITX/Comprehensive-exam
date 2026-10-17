@@ -168,3 +168,12 @@ select, input[type=number] { background: var(--card2); color: var(--text); borde
 @keyframes float { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, -80px); } }
 @keyframes pulse { 50% { opacity: .5; } }
 @media (min-width: 700px) { .app { padding-top: 24px; } }
+
+/* revision slides */
+.slide { min-height: 58vh; padding: 20px 18px; background: linear-gradient(165deg, var(--card), #1a2147 70%, #13324a); }
+.slide h2 { font-size: 22px; margin: 8px 0 14px; color: #fff; }
+.slide-body { font-size: 16.5px; line-height: 1.55; }
+.slide-body p { margin: 0 0 12px; }
+.slide-body ul { margin: 0 0 12px; padding-left: 20px; }
+.slide-body li { margin-bottom: 7px; }
+.slide-body .hook { font-size: 15px; }
